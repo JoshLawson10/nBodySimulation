@@ -1,10 +1,12 @@
 import random
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 import numpy as np
 from matplotlib import pyplot as plt
 
 N_BODIES = 10
+G = 6.674e-11
 
 
 @dataclass
@@ -38,6 +40,25 @@ class Body:
             f"Body('{self.name}', m={self.mass:.3e} kg, "
             f"q={self.position}, v={self.velocity})"
         )
+
+
+@dataclass
+class SimulationConfig:
+    t_start: float = 0.0
+    t_end: float = 3e9
+    tol: float = 1e-8
+    h0: float = 1e3
+    h_min: float = 1e-3
+    h_max: float = 1e6
+    steps_per_frame: int = 20
+    interval_ms: int = 30
+
+
+@dataclass
+class SimulationState:
+    ts: list[float] = field(default_factory=list)
+    qs: list[list[Vector3]] = field(default_factory=list)
+    wall_t0: float = field(default_factory=time.time)
 
 
 bodies: list[Body] = []
