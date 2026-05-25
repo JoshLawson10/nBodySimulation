@@ -24,7 +24,7 @@ class Body:
     position: Vector3
     velocity: Vector3
     name: str = ""
-    colour: str = "red"
+    color: str = "red"
 
     def __post_init__(self):
         if not self.name:
