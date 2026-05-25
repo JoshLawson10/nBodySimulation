@@ -40,7 +40,8 @@ def unpack(y: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
     return r, q
 
 
-ax1 = plt.figure().add_subplot(projection="3d")
+fig = plt.figure(figsize=(14, 6))
+ax1 = fig.add_subplot(121, projection="3d")
 ax1.set_title("3D Trajectories")
 ax1.set_xlabel("x (m)")
 ax1.set_ylabel("y (m)")
