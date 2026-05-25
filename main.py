@@ -38,6 +38,10 @@ class SimulationConfig:
 class SimulationState:
     ts: list[float] = field(default_factory=list)
     qs: list[list[Vector3]] = field(default_factory=list)
+    H0: float | None = None
+    Hs: list[float] = field(default_factory=list)
+    Ts: list[float] = field(default_factory=list)
+    Us: list[float] = field(default_factory=list)
     wall_t0: float = field(default_factory=time.time)
 
 
@@ -115,22 +119,30 @@ solver = solve_ivp_rk45(
 def update(frame: int):
     for _ in range(cfg.steps_per_frame):
         try:
-            t, y = next(solver)
+            t, y, H = next(solver)
         except StopIteration:
             break
 
         q, _ = unpack(y, n)
+        T = H[0]
+        U = H[1]
 
         origin = q[0].copy()
         q_rel = q - origin
 
+        if state.H0 is None:
+            state.H0 = T + U
+
         state.ts.append(t)  # type: ignore[arg-type]
+        state.Hs.append(T + U - state.H0)
+        state.Ts.append(T)
+        state.Us.append(U)
 
         for i in range(n):
             state.qs[i].append(Vector3(*q_rel[i]))
 
     if not state.qs[0]:
-        return traj_lines + body_markers
+        return traj_lines + body_markers + [energy_line, T_line, U_line]
 
     all_coords = []
     for i in range(n):
@@ -146,7 +158,13 @@ def update(frame: int):
     for setter, idx in zip([ax1.set_xlim, ax1.set_ylim, ax1.set_zlim], [0, 1, 2]):
         setter(all_coords[:, idx].min() - margin, all_coords[:, idx].max() + margin)
 
-    return traj_lines + body_markers
+    energy_line.set_data(np.array(state.ts), np.array(state.Hs))
+    T_line.set_data(np.array(state.ts), np.array(state.Ts))
+    U_line.set_data(np.array(state.ts), np.array(state.Us))
+    ax2.relim()
+    ax2.autoscale_view()
+
+    return traj_lines + body_markers + [energy_line, T_line, U_line]
 
 
 ani = animation.FuncAnimation(

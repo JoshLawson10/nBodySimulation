@@ -1,5 +1,6 @@
 import numpy as np
 
+from hamiltonian import hamiltonian
 from utils import unpack
 
 G = 6.674e-11
@@ -68,7 +69,7 @@ def solve_ivp_rk45(
     max_factor = 5.0
     min_factor = 0.2
 
-    yield t, y.copy()
+    yield t, y.copy(), hamiltonian(y, masses)
 
     while t < t_max:
         if t + h > t_max:
@@ -86,6 +87,6 @@ def solve_ivp_rk45(
         if error <= tol:
             t += h
             y = y5
-            yield t, y.copy()
+            yield t, y.copy(), hamiltonian(y, masses)
 
         h = min(h_max, max(h_min, h * factor))
