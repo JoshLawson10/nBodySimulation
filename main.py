@@ -1,5 +1,4 @@
-import random
-
+import numpy as np
 from matplotlib import pyplot as plt
 
 from data_types import Body, Vector3
@@ -8,21 +7,26 @@ N_BODIES = 10
 G = 6.674e-11
 
 
-bodies: list[Body] = []
+def make_random_bodies(n: int, seed: int | None = 31) -> list[Body]:
+    rng = np.random.default_rng(seed)
+    cmap = plt.colormaps["tab10"]
+    bodies: list[Body] = []
 
-for i in range(N_BODIES):
-    mass = random.uniform(1e20, 1e30)
-    position = Vector3(
-        random.uniform(-1e11, 1e11),
-        random.uniform(-1e11, 1e11),
-        random.uniform(-1e11, 1e11),
-    )
-    velocity = Vector3(
-        random.uniform(-1e4, 1e4),
-        random.uniform(-1e4, 1e4),
-        random.uniform(-1e4, 1e4),
-    )
-    bodies.append(Body(id=i, mass=mass, position=position, velocity=velocity))
+    for i in range(n):
+        m = float(rng.uniform(1e20, 1e30))
+        r = rng.uniform(-1e11, 1e11, 3)
+        q = rng.uniform(-1e4, 1e4, 3)
+        color = (
+            f"#{int(cmap(i / max(n - 1, 1))[0] * 255):02x}"
+            f"{int(cmap(i / max(n - 1, 1))[1] * 255):02x}"
+            f"{int(cmap(i / max(n - 1, 1))[2] * 255):02x}"
+        )
+        bodies.append(
+            Body(id=i, mass=m, position=Vector3(*r), velocity=Vector3(*q), color=color)
+        )
+
+    return bodies
+
 
 ax1 = plt.figure().add_subplot(projection="3d")
 ax1.set_title("3D Trajectories")
@@ -31,13 +35,15 @@ ax1.set_ylabel("y (m)")
 ax1.set_zlabel("z (m)")
 ax1.legend(fontsize=7)
 
+bodies = make_random_bodies(N_BODIES)
+
 for body in bodies:
     ax1.scatter(
         body.position.x,
         body.position.y,
-        body.position.z,
+        body.position.z,  # type: ignore
         label=body.name,
-        color=body.colour,
+        color=body.color,
     )
 
     ax1.text(
@@ -46,6 +52,6 @@ for body in bodies:
         body.position.z,
         body.name,
         fontsize=8,
-        color=body.colour,
+        color=body.color,
     )
 plt.show()
