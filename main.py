@@ -70,6 +70,7 @@ y0 = pack(bodies)
 
 fig = plt.figure(figsize=(14, 6))
 ax1 = fig.add_subplot(121, projection="3d")
+ax2 = fig.add_subplot(122)
 
 traj_lines = [
     Line3D([], [], [], color=bodies[i].color, linewidth=0.8, label=bodies[i].name)
@@ -88,6 +89,14 @@ ax1.set_xlabel("x (m)")
 ax1.set_ylabel("y (m)")
 ax1.set_zlabel("z (m)")
 ax1.legend(fontsize=7)
+
+(energy_line,) = ax2.plot([], [], color="orchid", linewidth=0.8)
+(T_line,) = ax2.plot([], [], color="blue", linewidth=0.8)
+(U_line,) = ax2.plot([], [], color="red", linewidth=0.8)
+ax2.set_xlabel("Time (s)")
+ax2.set_ylabel("ΔH (J)")
+ax2.set_title("Energy Conservation")
+ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 
