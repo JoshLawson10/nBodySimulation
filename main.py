@@ -102,6 +102,10 @@ ax2.set_ylabel("ΔH (J)")
 ax2.set_title("Energy Conservation")
 ax2.grid(True, alpha=0.3)
 
+info_text = fig.text(
+    0.5, 0.01, "Initialising...", ha="center", fontsize=9, family="monospace"
+)
+
 plt.tight_layout()
 
 state = SimulationState(qs=[[] for _ in range(n)])
@@ -117,10 +121,13 @@ solver = solve_ivp_rk45(
 
 
 def update(frame: int):
+    finished = False
+
     for _ in range(cfg.steps_per_frame):
         try:
             t, y, H = next(solver)
         except StopIteration:
+            finished = True
             break
 
         q, _ = unpack(y, n)
@@ -163,6 +170,17 @@ def update(frame: int):
     U_line.set_data(np.array(state.ts), np.array(state.Us))
     ax2.relim()
     ax2.autoscale_view()
+
+    wall_elapsed = time.time() - state.wall_t0
+    progress = (state.ts[-1] - cfg.t0) / (cfg.t_max - cfg.t0) * 100
+    status = "Complete" if finished else "Running"
+    info_text.set_text(
+        f"{status}  |  "
+        f"Sim time: {state.ts[-1]:.3e} s  |  "
+        f"Progress: {progress:.1f}%  |  "
+        f"Wall time: {wall_elapsed:.1f} s  |  "
+        f"ΔH: {state.Hs[-1]:.3e} J"
+    )
 
     return traj_lines + body_markers + [energy_line, T_line, U_line]
 
