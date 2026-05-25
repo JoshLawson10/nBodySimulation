@@ -28,6 +28,18 @@ def make_random_bodies(n: int, seed: int | None = 31) -> list[Body]:
     return bodies
 
 
+def pack(bodies: list[Body]) -> np.ndarray:
+    r = np.array([b.position.to_array() for b in bodies])
+    q = np.array([b.velocity.to_array() for b in bodies])
+    return np.concatenate([r.flatten(), q.flatten()])
+
+
+def unpack(y: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
+    r = y[: 3 * n].reshape(n, 3)
+    q = y[3 * n :].reshape(n, 3)
+    return r, q
+
+
 ax1 = plt.figure().add_subplot(projection="3d")
 ax1.set_title("3D Trajectories")
 ax1.set_xlabel("x (m)")
@@ -36,6 +48,9 @@ ax1.set_zlabel("z (m)")
 ax1.legend(fontsize=7)
 
 bodies = make_random_bodies(N_BODIES)
+masses = np.array([b.mass for b in bodies])
+n = len(bodies)
+y0 = pack(bodies)
 
 for body in bodies:
     ax1.scatter(
