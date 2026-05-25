@@ -1,5 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Line3D
 
 from data_types import Body, Vector3
 
@@ -40,18 +41,33 @@ def unpack(y: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
     return r, q
 
 
+bodies = make_random_bodies(N_BODIES)
+masses = np.array([b.mass for b in bodies])
+n = len(bodies)
+y0 = pack(bodies)
+
 fig = plt.figure(figsize=(14, 6))
 ax1 = fig.add_subplot(121, projection="3d")
+
+traj_lines = [
+    Line3D([], [], [], color=bodies[i].color, linewidth=0.8, label=bodies[i].name)
+    for i in range(n)
+]
+body_markers = [
+    Line3D([], [], [], color=bodies[i].color, marker="o", markersize=6, linestyle="")
+    for i in range(n)
+]
+
+for line in traj_lines + body_markers:
+    ax1.add_line(line)
+
 ax1.set_title("3D Trajectories")
 ax1.set_xlabel("x (m)")
 ax1.set_ylabel("y (m)")
 ax1.set_zlabel("z (m)")
 ax1.legend(fontsize=7)
 
-bodies = make_random_bodies(N_BODIES)
-masses = np.array([b.mass for b in bodies])
-n = len(bodies)
-y0 = pack(bodies)
+plt.tight_layout()
 
 for body in bodies:
     ax1.scatter(
