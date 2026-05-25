@@ -15,7 +15,6 @@ Naming Convention:
 
 
 N_BODIES = 10
-G = 6.674e-11
 
 
 def make_random_bodies(n: int, seed: int | None = 31) -> list[Body]:
