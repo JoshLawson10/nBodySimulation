@@ -4,6 +4,15 @@ from mpl_toolkits.mplot3d.art3d import Line3D
 
 from data_types import Body, Vector3
 
+"""
+Naming Convention:
+    position -> q
+    displacement -> r
+    velocity -> v
+    acceleration -> a
+"""
+
+
 N_BODIES = 10
 G = 6.674e-11
 
