@@ -18,7 +18,7 @@ Naming Convention:
     acceleration → a (array of shape (n, 3))
 """
 
-N_BODIES = 4
+N_BODIES = 2
 T_MAX = 3e9
 STEPS_PER_FRAME = 20
 HISTORY_CAPACITY = 50000
@@ -40,7 +40,7 @@ rcParams["font.size"] = 9
 class SimulationConfig:
     t0: float = 0.0
     t_max: float = T_MAX
-    tol: float = 1e-8
+    tol: float = 1e-12
     h0: float = 1e3
     h_min: float = 1e-3
     h_max: float = 1e6
@@ -54,7 +54,7 @@ def make_random_bodies(n: int, seed: int | None = 31) -> list[Body]:
     bodies: list[Body] = []
 
     for i in range(n):
-        m = float(rng.uniform(1e20, 1e30))
+        m = float(rng.uniform(1e29, 1e30))
         r = rng.uniform(-1e11, 1e11, 3)
         v = rng.uniform(-1e4, 1e4, 3)
         hue = i / max(n - 1, 1)
@@ -147,6 +147,9 @@ ax_energy_combined.set_title(
 (potential_line,) = ax_energy_combined.plot(
     [], [], color="#ff6600", linewidth=2, label="Potential (U)"
 )
+(total_line,) = ax_energy_combined.plot(
+    [], [], color="#ff00ff", linewidth=2, label="Total (H)"
+)
 ax_energy_combined.set_xlabel("Time (s)", fontsize=9)
 ax_energy_combined.set_ylabel("Energy (J)", fontsize=9)
 ax_energy_combined.grid(True, alpha=0.15)
@@ -217,7 +220,9 @@ def update(frame: int):
 
     if frame_count == 0:
         return (
-            traj_lines + body_markers + [energy_dh_line, kinetic_line, potential_line]
+            traj_lines
+            + body_markers
+            + [energy_dh_line, kinetic_line, potential_line, total_line]
         )
 
     actual_frames = frame_count
@@ -238,6 +243,7 @@ def update(frame: int):
     energy_dh_line.set_data(ts_data, Hs[:actual_frames])
     kinetic_line.set_data(ts_data, Ts[:actual_frames])
     potential_line.set_data(ts_data, Us[:actual_frames])
+    total_line.set_data(ts_data, Hs[:actual_frames])
 
     for ax in [ax_energy_dh, ax_energy_combined]:
         ax.relim()
@@ -259,7 +265,11 @@ def update(frame: int):
     )
     info_text.set_text(status_str)
 
-    return traj_lines + body_markers + [energy_dh_line, kinetic_line, potential_line]
+    return (
+        traj_lines
+        + body_markers
+        + [energy_dh_line, kinetic_line, potential_line, total_line]
+    )
 
 
 ani = animation.FuncAnimation(
