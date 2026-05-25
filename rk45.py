@@ -21,23 +21,27 @@ B4 = [5179 / 57600, 0, 7571 / 16695, 393 / 640, -92097 / 339200, 187 / 2100, 1 /
 
 
 def derivatives(y: np.ndarray, masses: np.ndarray) -> np.ndarray:
+    """Compute dy/dt using vectorized pairwise gravitational forces."""
     n = len(masses)
-    r, q = unpack(y, n)
-    a = np.zeros((n, 3))
+    positions, velocities = unpack(y, n)
+    accelerations = np.zeros((n, 3))
 
-    for i in range(n):
-        for j in range(n):
-            if i is not j:
-                r_ij = r[j] - r[i]
-                dist = np.linalg.norm(r_ij)
-                a[i] += G * masses[j] / dist**3 * r_ij
+    dr = positions[np.newaxis, :, :] - positions[:, np.newaxis, :]
+    distances = np.linalg.norm(dr, axis=2)
+    np.fill_diagonal(distances, 1)
 
-    return np.concatenate([q.flatten(), a.flatten()])
+    forces = (
+        G * masses[np.newaxis, :, np.newaxis] / distances[:, :, np.newaxis] ** 3 * dr
+    )
+    accelerations = forces.sum(axis=1)
+
+    return np.concatenate([velocities.flatten(), accelerations.flatten()])
 
 
 def rk45_step(
     y: np.ndarray, t: float | np.floating, h: float | np.floating, masses: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Perform one RK45 adaptive step and return both 5th and 4th order solutions."""
     k = []
 
     for i in range(6):
@@ -61,6 +65,10 @@ def solve_ivp_rk45(
     t_max: float | np.floating = 1e9,
     tol: float | np.floating = 1e-8,
 ):
+    """
+    RK45 adaptive step-size ODE solver for N-body gravitational dynamics.
+    Yields (time, state_vector, hamiltonian) tuples.
+    """
     t = t0
     y = y0.copy()
     h = h0

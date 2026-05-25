@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib import animation
@@ -12,37 +12,29 @@ from utils import pack, unpack
 
 """
 Naming Convention:
-    position -> q
-    displacement -> r
-    velocity -> v
-    acceleration -> a
+    position → r (array of shape (n, 3))
+    displacement → Δr
+    velocity → v (array of shape (n, 3))
+    acceleration → a (array of shape (n, 3))
 """
 
 
 N_BODIES = 3
+T_MAX = 3e9
+STEPS_PER_FRAME = 20
+HISTORY_CAPACITY = 50000
 
 
 @dataclass
 class SimulationConfig:
     t0: float = 0.0
-    t_max: float = 3e9
+    t_max: float = T_MAX
     tol: float = 1e-8
     h0: float = 1e3
     h_min: float = 1e-3
     h_max: float = 1e6
-    steps_per_frame: int = 20
+    steps_per_frame: int = STEPS_PER_FRAME
     interval_ms: int = 30
-
-
-@dataclass
-class SimulationState:
-    ts: list[float] = field(default_factory=list)
-    qs: list[list[Vector3]] = field(default_factory=list)
-    H0: float | None = None
-    Hs: list[float] = field(default_factory=list)
-    Ts: list[float] = field(default_factory=list)
-    Us: list[float] = field(default_factory=list)
-    wall_t0: float = field(default_factory=time.time)
 
 
 def make_random_bodies(n: int, seed: int | None = 31) -> list[Body]:
@@ -53,14 +45,14 @@ def make_random_bodies(n: int, seed: int | None = 31) -> list[Body]:
     for i in range(n):
         m = float(rng.uniform(1e20, 1e30))
         r = rng.uniform(-1e11, 1e11, 3)
-        q = rng.uniform(-1e4, 1e4, 3)
+        v = rng.uniform(-1e4, 1e4, 3)
         color = (
             f"#{int(cmap(i / max(n - 1, 1))[0] * 255):02x}"
             f"{int(cmap(i / max(n - 1, 1))[1] * 255):02x}"
             f"{int(cmap(i / max(n - 1, 1))[2] * 255):02x}"
         )
         bodies.append(
-            Body(id=i, mass=m, position=Vector3(*r), velocity=Vector3(*q), color=color)
+            Body(id=i, mass=m, position=Vector3(*r), velocity=Vector3(*v), color=color)
         )
 
     return bodies
@@ -108,7 +100,15 @@ info_text = fig.text(
 
 plt.tight_layout()
 
-state = SimulationState(qs=[[] for _ in range(n)])
+ts = np.zeros(HISTORY_CAPACITY)
+Hs = np.zeros(HISTORY_CAPACITY)
+Ts = np.zeros(HISTORY_CAPACITY)
+Us = np.zeros(HISTORY_CAPACITY)
+qs_history = np.zeros((n, HISTORY_CAPACITY, 3))
+frame_count = 0
+H0 = None
+wall_t0 = time.time()
+
 solver = solve_ivp_rk45(
     y0=y0,
     t0=cfg.t0,
@@ -121,6 +121,8 @@ solver = solve_ivp_rk45(
 
 
 def update(frame: int):
+    global frame_count, H0
+
     finished = False
 
     for _ in range(cfg.steps_per_frame):
@@ -130,56 +132,57 @@ def update(frame: int):
             finished = True
             break
 
-        q, _ = unpack(y, n)
+        positions, _ = unpack(y, n)
         T = H[0]
         U = H[1]
 
-        origin = q[0].copy()
-        q_rel = q - origin
+        origin = positions[0].copy()
+        positions_rel = positions - origin
 
-        if state.H0 is None:
-            state.H0 = T + U
+        if H0 is None:
+            H0 = T + U
 
-        state.ts.append(t)  # type: ignore[arg-type]
-        state.Hs.append(T + U - state.H0)
-        state.Ts.append(T)
-        state.Us.append(U)
+        ts[frame_count] = t
+        Hs[frame_count] = T + U - H0
+        Ts[frame_count] = T
+        Us[frame_count] = U
+        qs_history[:, frame_count, :] = positions_rel
 
-        for i in range(n):
-            state.qs[i].append(Vector3(*q_rel[i]))
+        frame_count += 1
 
-    if not state.qs[0]:
+    if frame_count == 0:
         return traj_lines + body_markers + [energy_line, T_line, U_line]
 
-    all_coords = []
-    for i in range(n):
-        arr = np.array([[v.x, v.y, v.z] for v in state.qs[i]])
-        traj_lines[i].set_data(arr[:, 0], arr[:, 1])
-        traj_lines[i].set_3d_properties(arr[:, 2])  # type: ignore[arg-type]
-        body_markers[i].set_data([arr[-1, 0]], [arr[-1, 1]])
-        body_markers[i].set_3d_properties(arr[-1, 2])  # type: ignore[arg-type]
-        all_coords.append(arr)
+    actual_frames = frame_count
+    ts_data = ts[:actual_frames]
+    qs_data = qs_history[:, :actual_frames, :]
 
-    all_coords = np.concatenate(all_coords)
+    for i in range(n):
+        traj_lines[i].set_data(qs_data[i, :, 0], qs_data[i, :, 1])
+        traj_lines[i].set_3d_properties(qs_data[i, :, 2])  # type: ignore[arg-type]
+        body_markers[i].set_data([qs_data[i, -1, 0]], [qs_data[i, -1, 1]])
+        body_markers[i].set_3d_properties(qs_data[i, -1, 2])  # type: ignore[arg-type]
+
+    all_coords = qs_data.reshape(-1, 3)
     margin = 0.1 * np.ptp(all_coords, axis=0).max()
     for setter, idx in zip([ax1.set_xlim, ax1.set_ylim, ax1.set_zlim], [0, 1, 2]):
         setter(all_coords[:, idx].min() - margin, all_coords[:, idx].max() + margin)
 
-    energy_line.set_data(np.array(state.ts), np.array(state.Hs))
-    T_line.set_data(np.array(state.ts), np.array(state.Ts))
-    U_line.set_data(np.array(state.ts), np.array(state.Us))
+    energy_line.set_data(ts_data, Hs[:actual_frames])
+    T_line.set_data(ts_data, Ts[:actual_frames])
+    U_line.set_data(ts_data, Us[:actual_frames])
     ax2.relim()
     ax2.autoscale_view()
 
-    wall_elapsed = time.time() - state.wall_t0
-    progress = (state.ts[-1] - cfg.t0) / (cfg.t_max - cfg.t0) * 100
+    wall_elapsed = time.time() - wall_t0
+    progress = (ts_data[-1] - cfg.t0) / (cfg.t_max - cfg.t0) * 100
     status = "Complete" if finished else "Running"
     info_text.set_text(
         f"{status}  |  "
-        f"Sim time: {state.ts[-1]:.3e} s  |  "
+        f"Sim time: {ts_data[-1]:.3e} s  |  "
         f"Progress: {progress:.1f}%  |  "
         f"Wall time: {wall_elapsed:.1f} s  |  "
-        f"ΔH: {state.Hs[-1]:.3e} J"
+        f"ΔH: {Hs[actual_frames - 1]:.3e} J"
     )
 
     return traj_lines + body_markers + [energy_line, T_line, U_line]
