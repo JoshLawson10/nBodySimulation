@@ -8,7 +8,7 @@ def solve_ivp(
     y0: np.ndarray,
     dt: float,
     t0: float,
-    t_max: float,
+    t_max: float = float("inf"),
     a_tol: float = 1e-8,
     r_tol: float = 1e-3,
     dt_max: float = 2.0,
@@ -24,7 +24,7 @@ def solve_ivp(
     t = t0
 
     while t < t_max:
-        if t + dt > t_max:
+        if t_max != float("inf") and t + dt > t_max:
             dt = t_max - t
 
         k1 = func_(t, y_current)

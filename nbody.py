@@ -1,5 +1,6 @@
 import sys
 import time
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from tkinter import (
     BOTH,
@@ -21,8 +22,7 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3D
 
 from data_types import Body, Vector3
-from rk45 import solve_ivp_rk45
-from utils import pack, unpack
+from solvers.dynamic import solve_ivp
 
 """
 Naming Convention:
@@ -32,10 +32,8 @@ Naming Convention:
     acceleration → a (array of shape (n, 3))
 """
 
-N_BODIES = 4
-T_MAX = 3e9
-STEPS_PER_FRAME = 20
-HISTORY_CAPACITY = 200000
+STEPS_PER_FRAME = 10
+HISTORY_CAPACITY = 20000
 
 rcParams["figure.facecolor"] = "#0d0d0d"
 rcParams["axes.facecolor"] = "#1a1a1a"
@@ -53,11 +51,10 @@ rcParams["font.size"] = 9
 @dataclass
 class SimulationConfig:
     t0: float = 0.0
-    t_max: float = T_MAX
-    tol: float = 1e-12
-    h0: float = 1e3
-    h_min: float = 1e-3
-    h_max: float = 1e6
+    dt: float = 0.01
+    a_tol: float = 1e-8
+    r_tol: float = 1e-3
+    dt_max: float = 0.1
     steps_per_frame: int = STEPS_PER_FRAME
     interval_ms: int = 30
 
@@ -76,7 +73,7 @@ class BodySetupDialog:
         self.body_frames = []
 
         master.title("N-Body Simulation Setup")
-        master.geometry("500x600")
+        master.geometry("650x750")
         master.configure(bg="#1a1a1a")
 
         title = Label(
@@ -87,6 +84,15 @@ class BodySetupDialog:
             font=("monospace", 14, "bold"),
         )
         title.pack(pady=10)
+
+        info = Label(
+            master,
+            text="Units: Masses in solar masses (M☉), Positions in AU, Velocities in AU/year",
+            bg="#1a1a1a",
+            fg="#ffaa00",
+            font=("monospace", 9),
+        )
+        info.pack(pady=5)
 
         scroll_frame = Frame(master, bg="#1a1a1a")
         scroll_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
@@ -109,6 +115,18 @@ class BodySetupDialog:
         )
         add_btn.pack(side=LEFT, padx=5)
 
+        remove_btn = Button(
+            button_frame,
+            text="- REMOVE BODY",
+            command=self.remove_body_row,
+            bg="#4d0a0a",
+            fg="#ff6666",
+            font=("monospace", 10, "bold"),
+            padx=10,
+            pady=5,
+        )
+        remove_btn.pack(side=LEFT, padx=5)
+
         random_btn = Button(
             button_frame,
             text="RANDOM",
@@ -125,8 +143,8 @@ class BodySetupDialog:
             button_frame,
             text="SIMULATE",
             command=self.simulate,
-            bg="#4d0a0a",
-            fg="#ff6600",
+            bg="#0a4d2c",
+            fg="#00ff99",
             font=("monospace", 10, "bold"),
             padx=15,
             pady=5,
@@ -145,17 +163,28 @@ class BodySetupDialog:
         )
         frame.pack(fill=X, pady=3, padx=0)
 
+        body_num = len(self.body_frames) + 1
+        num_label = Label(
+            frame,
+            text=f"#{body_num}",
+            bg="#0d0d0d",
+            fg="#00ff99",
+            font=("monospace", 9, "bold"),
+            width=4,
+        )
+        num_label.pack(side=LEFT, padx=3)
+
         mass_label = Label(
             frame,
-            text="MASS:",
+            text="M☉:",
             bg="#0d0d0d",
             fg="#f0f0f0",
             font=("monospace", 9),
-            width=6,
+            width=4,
         )
-        mass_label.pack(side=LEFT, padx=3, pady=3)
+        mass_label.pack(side=LEFT, padx=3)
 
-        mass_var = StringVar(value="1e30")
+        mass_var = StringVar(value="1.0")
         mass_entry = Entry(
             frame,
             textvariable=mass_var,
@@ -168,11 +197,11 @@ class BodySetupDialog:
 
         pos_label = Label(
             frame,
-            text="POS:",
+            text="POS (AU):",
             bg="#0d0d0d",
             fg="#f0f0f0",
             font=("monospace", 9),
-            width=4,
+            width=9,
         )
         pos_label.pack(side=LEFT, padx=3)
 
@@ -209,14 +238,13 @@ class BodySetupDialog:
         )
         pos_z_entry.pack(side=LEFT, padx=1)
 
-        # VEL
         vel_label = Label(
             frame,
-            text="VEL:",
+            text="VEL (AU/yr):",
             bg="#0d0d0d",
             fg="#f0f0f0",
             font=("monospace", 9),
-            width=4,
+            width=10,
         )
         vel_label.pack(side=LEFT, padx=3)
 
@@ -266,19 +294,28 @@ class BodySetupDialog:
             }
         )
 
+    def remove_body_row(self):
+        if len(self.body_frames) > 0:
+            frame_data = self.body_frames.pop()
+            frame_data["frame"].destroy()
+            for i, bf in enumerate(self.body_frames):
+                num_label = bf["frame"].winfo_children()[0]
+                num_label.config(text=f"#{i + 1}")
+
     def randomize_bodies(self):
         rng = np.random.default_rng()
         for body_data in self.body_frames:
-            m = float(rng.uniform(1e29, 1e30))
-            r = rng.uniform(-1e11, 1e11, 3)
-            v = rng.uniform(-1e4, 1e4, 3)
-            body_data["mass_var"].set(f"{m:.2e}")
-            body_data["pos_x"].set(f"{r[0]:.2e}")
-            body_data["pos_y"].set(f"{r[1]:.2e}")
-            body_data["pos_z"].set(f"{r[2]:.2e}")
-            body_data["vel_x"].set(f"{v[0]:.2e}")
-            body_data["vel_y"].set(f"{v[1]:.2e}")
-            body_data["vel_z"].set(f"{v[2]:.2e}")
+            m = float(rng.uniform(0.1, 10.0))
+            r = rng.uniform(-10, 10, 3)
+            v = rng.uniform(-5, 5, 3)
+            body_data["mass_var"].set(f"{m:.3f}")
+            body_data["pos_x"].set(f"{r[0]:.2f}")
+            body_data["pos_y"].set(f"{r[1]:.2f}")
+            body_data["pos_z"].set(f"{r[2]:.2f}")
+            body_data["vel_x"].set(f"{v[0]:.2f}")
+            body_data["vel_y"].set(f"{v[1]:.2f}")
+            body_data["vel_z"].set(f"{v[2]:.2f}")
+        self.selected_preset = "random"
 
     def simulate(self):
         bodies = []
@@ -310,10 +347,10 @@ class BodySetupDialog:
 
             self.result = bodies
             self.master.destroy()
-        except ValueError:
+        except ValueError as e:
             messagebox.showerror(
                 "Error",
-                "Invalid input format. Mass and velocity values must be numbers",
+                f"Invalid input format: {e}\nMass and velocity values must be numbers",
             )
 
 
@@ -321,225 +358,460 @@ def show_body_setup_dialog() -> list[Body]:
     root = Tk()
     dialog = BodySetupDialog(root)
     root.wait_window()
-    return dialog.result or []
+    if dialog.result:
+        return dialog.result
+    return []
 
 
-cfg = SimulationConfig()
-bodies = show_body_setup_dialog()
-if not bodies:
-    print("No bodies configured. Exiting.")
-    sys.exit()
-masses = np.array([b.mass for b in bodies])
-n = len(bodies)
-y0 = pack(bodies)
+def nbody_dynamics(
+    masses: np.ndarray, softening: float = 0.0, G: float = 1.0
+) -> Callable:
+    n_bodies = len(masses)
+    n_coords = n_bodies * 3
 
-fig = plt.figure(figsize=(16, 10))
-fig.suptitle(
-    "N-BODY GRAVITATIONAL SIMULATION", fontsize=16, fontweight="bold", color="#00ff99"
-)
+    def dynamics(t: float, *state_flat: float) -> np.ndarray:
+        state = np.array(state_flat, dtype=float)
+        positions = state[:n_coords].reshape(n_bodies, 3)
+        velocities = state[n_coords:].reshape(n_bodies, 3)
 
-gs = fig.add_gridspec(
-    2, 2, hspace=0.3, wspace=0.3, left=0.05, right=0.98, top=0.93, bottom=0.08
-)
-ax_3d = fig.add_subplot(gs[:, 0], projection="3d")
-ax_3d.set_facecolor("#1a1a1a")
+        accelerations = np.zeros_like(positions)
 
-ax_energy_dh = fig.add_subplot(gs[0, 1])
-ax_energy_combined = fig.add_subplot(gs[1, 1])
+        for i in range(n_bodies):
+            for j in range(i + 1, n_bodies):
+                dr = positions[j] - positions[i]
+                dist_sq = np.dot(dr, dr) + softening**2
+                dist = np.sqrt(dist_sq)
+                force_mag = G / (dist_sq * dist)  # G / r^3
 
-ax_3d.set_title(
-    "3D TRAJECTORIES", fontsize=12, fontweight="bold", pad=10, color="#00ff99"
-)
-ax_3d.set_xlabel("X (m)", fontsize=10, color="#00ccff")
-ax_3d.set_ylabel("Y (m)", fontsize=10, color="#00ccff")
-ax_3d.set_zlabel("Z (m)", fontsize=10, color="#00ccff")
-ax_3d.grid(True, alpha=0.15, linestyle="--")
+                acc_ij = force_mag * dr * masses[j]
+                accelerations[i] += acc_ij
+                accelerations[j] -= force_mag * dr * masses[i]
 
-traj_lines = [
-    Line3D(
-        [],
-        [],
-        [],
-        color=bodies[i].color,
-        linewidth=1.5,
-        label=f"Body {i + 1}",
-        alpha=0.9,
-    )
-    for i in range(n)
-]
-body_markers = [
-    Line3D(
-        [],
-        [],
-        [],
-        color=bodies[i].color,
-        marker="o",
-        markersize=10,
-        linestyle="",
-        markeredgecolor="#ffffff",
-        markeredgewidth=0.5,
-    )
-    for i in range(n)
-]
+        return np.concatenate([velocities.flatten(), accelerations.flatten()])
 
-for line in traj_lines + body_markers:
-    ax_3d.add_line(line)
-
-ax_3d.legend(loc="upper left", fontsize=9, framealpha=0.9, fancybox=True)
-
-ax_energy_dh.set_title(
-    "ENERGY DEVIATION", fontsize=11, fontweight="bold", color="#00ff99"
-)
-(energy_dh_line,) = ax_energy_dh.plot([], [], color="#ff00ff", linewidth=2, label="ΔH")
-ax_energy_dh.set_xlabel("Time (s)", fontsize=9)
-ax_energy_dh.set_ylabel("ΔH (J)", fontsize=9, color="#ff00ff")
-ax_energy_dh.grid(True, alpha=0.15)
-ax_energy_dh.tick_params(axis="y", labelcolor="#ff00ff")
-
-ax_energy_combined.set_title(
-    "KINETIC & POTENTIAL", fontsize=11, fontweight="bold", color="#00ff99"
-)
-(kinetic_line,) = ax_energy_combined.plot(
-    [], [], color="#00ccff", linewidth=2, label="Kinetic (T)"
-)
-(potential_line,) = ax_energy_combined.plot(
-    [], [], color="#ff6600", linewidth=2, label="Potential (U)"
-)
-(total_line,) = ax_energy_combined.plot(
-    [], [], color="#ff00ff", linewidth=2, label="Total (H)"
-)
-ax_energy_combined.set_xlabel("Time (s)", fontsize=9)
-ax_energy_combined.set_ylabel("Energy (J)", fontsize=9)
-ax_energy_combined.grid(True, alpha=0.15)
-ax_energy_combined.legend(loc="best", fontsize=8)
-
-info_text = fig.text(
-    0.5,
-    0.01,
-    "Initialising...",
-    ha="center",
-    fontsize=10,
-    family="monospace",
-    bbox={
-        "boxstyle": "round",
-        "facecolor": "#1a1a1a",
-        "edgecolor": "#00ff99",
-        "linewidth": 2,
-        "pad": 0.8,
-    },
-    color="#f0f0f0",
-)
-
-ts = np.zeros(HISTORY_CAPACITY)
-Hs = np.zeros(HISTORY_CAPACITY)
-Ts = np.zeros(HISTORY_CAPACITY)
-Us = np.zeros(HISTORY_CAPACITY)
-qs_history = np.zeros((n, HISTORY_CAPACITY, 3))
-frame_count = 0
-H0 = None
-wall_t0 = time.time()
-
-solver = solve_ivp_rk45(
-    y0=y0,
-    t0=cfg.t0,
-    t_max=cfg.t_max,
-    h0=cfg.h0,
-    h_min=cfg.h_min,
-    h_max=cfg.h_max,
-    masses=masses,
-)
+    return dynamics
 
 
-def update(frame: int):
-    global frame_count, H0
+def _compute_energies(
+    state: np.ndarray,
+    masses: np.ndarray,
+    softening: float = 0.0,
+    G: float = 1.0,
+) -> tuple[float, float]:
+    n_bodies = len(masses)
+    n_coords = n_bodies * 3
+    positions = state[:n_coords].reshape(n_bodies, 3)
+    velocities = state[n_coords:].reshape(n_bodies, 3)
 
-    finished = False
+    kinetic_energy = float(0.5 * np.sum(masses[:, None] * velocities**2))
 
-    for _ in range(cfg.steps_per_frame):
-        try:
-            t, y, H = next(solver)
-        except StopIteration:
-            finished = True
-            break
+    potential_energy = 0.0
+    for i in range(n_bodies):
+        for j in range(i + 1, n_bodies):
+            dr = positions[j] - positions[i]
+            dist = np.sqrt(np.dot(dr, dr) + softening**2)
+            potential_energy -= G * masses[i] * masses[j] / dist
 
-        positions, _ = unpack(y, n)
-        T = H[0]
-        U = H[1]
+    return kinetic_energy, potential_energy
 
-        origin = positions[0].copy()
-        positions_rel = positions - origin
 
-        if H0 is None:
-            H0 = T + U
+class NBodySimulator:
+    def __init__(
+        self,
+        bodies: list[Body],
+        G: float = 1.0,
+        softening: float = 0.001,
+    ):
+        self.bodies = bodies
+        self.masses = np.array([b.mass for b in bodies])
+        self.n_bodies = len(self.masses)
+        self.G = G
+        self.softening = softening
 
-        ts[frame_count] = t
-        Hs[frame_count] = T + U - H0
-        Ts[frame_count] = T
-        Us[frame_count] = U
-        qs_history[:, frame_count, :] = positions_rel
-
-        frame_count += 1
-
-    if frame_count == 0:
-        return (
-            traj_lines
-            + body_markers
-            + [energy_dh_line, kinetic_line, potential_line, total_line]
+        initial_positions = np.array(
+            [[b.position.x, b.position.y, b.position.z] for b in bodies]
+        )
+        initial_velocities = np.array(
+            [[b.velocity.x, b.velocity.y, b.velocity.z] for b in bodies]
         )
 
-    actual_frames = frame_count
-    ts_data = ts[:actual_frames]
-    qs_data = qs_history[:, :actual_frames, :]
+        self.initial_state = np.concatenate(
+            [initial_positions.flatten(), initial_velocities.flatten()]
+        )
 
-    for i in range(n):
-        traj_lines[i].set_data(qs_data[i, :, 0], qs_data[i, :, 1])
-        traj_lines[i].set_3d_properties(qs_data[i, :, 2])  # type: ignore[arg-type]
-        body_markers[i].set_data([qs_data[i, -1, 0]], [qs_data[i, -1, 1]])
-        body_markers[i].set_3d_properties(qs_data[i, -1, 2])  # type: ignore[arg-type]
+        self.dynamics_func = nbody_dynamics(self.masses, self.softening, self.G)
 
-    all_coords = qs_data.reshape(-1, 3)
-    margin = 0.15 * np.ptp(all_coords, axis=0).max()
-    for setter, idx in zip([ax_3d.set_xlim, ax_3d.set_ylim, ax_3d.set_zlim], [0, 1, 2]):
-        setter(all_coords[:, idx].min() - margin, all_coords[:, idx].max() + margin)
+    def simulate(
+        self,
+        dt: float,
+        a_tol: float = 1e-8,
+        r_tol: float = 1e-3,
+        dt_max: float = 0.1,
+        callback: Callable[..., bool] | None = None,
+    ) -> Generator[
+        tuple[float, np.ndarray, np.ndarray, tuple[float, float]], None, None
+    ]:
+        n_coords = self.n_bodies * 3
 
-    energy_dh_line.set_data(ts_data, Hs[:actual_frames])
-    kinetic_line.set_data(ts_data, Ts[:actual_frames])
-    potential_line.set_data(ts_data, Us[:actual_frames])
-    total_line.set_data(ts_data, Hs[:actual_frames])
+        for t, state in solve_ivp(
+            func=self.dynamics_func,
+            y0=self.initial_state,
+            dt=dt,
+            t0=0.0,
+            a_tol=a_tol,
+            r_tol=r_tol,
+            dt_max=dt_max,
+        ):
+            positions = state[:n_coords].reshape(self.n_bodies, 3)
+            velocities = state[n_coords:].reshape(self.n_bodies, 3)
+            energies = _compute_energies(state, self.masses, self.softening, self.G)
 
-    for ax in [ax_energy_dh, ax_energy_combined]:
-        ax.relim()
-        ax.autoscale_view()
+            if callback is not None:
+                should_continue = callback(t, positions, velocities)
+                if not should_continue:
+                    break
 
-    wall_elapsed = time.time() - wall_t0
-    progress = (ts_data[-1] - cfg.t0) / (cfg.t_max - cfg.t0) * 100
-    status = "● COMPLETE" if finished else "● RUNNING"
-    speed_ratio = ts_data[-1] / wall_elapsed if wall_elapsed > 0 else 0
-    energy_error_pct = abs(Hs[actual_frames - 1]) / (H0 if H0 != 0 else 1) * 100
+            yield t, positions, velocities, energies
 
-    status_str = (
-        f"{status}  │  "
-        f"Sim: {ts_data[-1]:.2e}s  │  "
-        f"Real: {wall_elapsed:.1f}s  │  "
-        f"Speed: {speed_ratio:.1f}x  │  "
-        f"Progress: {progress:.1f}%  │  "
-        f"ΔE: {Hs[actual_frames - 1]:.2e}J ({energy_error_pct:.15f}%)"
+
+class SimulationVisualizer:
+    def __init__(
+        self,
+        simulator: NBodySimulator,
+        config: SimulationConfig,
+        body_colors: list[str] | None = None,
+        body_sizes: list[float] | None = None,
+    ):
+        self.simulator = simulator
+        self.config = config
+
+        n_coords = simulator.n_bodies * 3
+        initial_state = simulator.initial_state
+        initial_positions = initial_state[:n_coords].reshape(simulator.n_bodies, 3)
+
+        if body_colors is None:
+            self.body_colors = [
+                get_body_color(i, simulator.n_bodies) for i in range(simulator.n_bodies)
+            ]
+        else:
+            self.body_colors = body_colors
+
+        if body_sizes is None:
+            masses = simulator.masses
+            min_mass = masses.min()
+            max_mass = masses.max()
+            if max_mass > min_mass:
+                self.body_sizes = 50 + 450 * (masses - min_mass) / (max_mass - min_mass)
+            else:
+                self.body_sizes = np.full(simulator.n_bodies, 100)
+        else:
+            self.body_sizes = body_sizes
+
+        self.ts = np.zeros(HISTORY_CAPACITY)
+        self.Hs = np.zeros(HISTORY_CAPACITY)
+        self.Ts = np.zeros(HISTORY_CAPACITY)
+        self.Us = np.zeros(HISTORY_CAPACITY)
+        self.positions_history = np.zeros((simulator.n_bodies, HISTORY_CAPACITY, 3))
+        self.frame_count = 0
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.fig = plt.figure(figsize=(16, 10))
+        self.fig.suptitle(
+            "N-BODY GRAVITATIONAL SIMULATION",
+            fontsize=16,
+            fontweight="bold",
+            color="#00ff99",
+        )
+
+        self.gs = self.fig.add_gridspec(
+            2, 2, hspace=0.3, wspace=0.3, left=0.05, right=0.98, top=0.93, bottom=0.08
+        )
+
+        self.ax_3d = self.fig.add_subplot(self.gs[:, 0], projection="3d")
+        self.ax_3d.set_facecolor("#1a1a1a")
+        self.ax_3d.set_title(
+            "3D TRAJECTORIES", fontsize=12, fontweight="bold", pad=10, color="#00ff99"
+        )
+        self.ax_3d.set_xlabel("X (AU)", fontsize=10, color="#00ccff")
+        self.ax_3d.set_ylabel("Y (AU)", fontsize=10, color="#00ccff")
+        self.ax_3d.set_zlabel("Z (AU)", fontsize=10, color="#00ccff")
+        self.ax_3d.grid(True, alpha=0.15, linestyle="--")
+
+        self.traj_lines = []
+        for i in range(self.simulator.n_bodies):
+            line = Line3D(
+                [],
+                [],
+                [],
+                color=self.body_colors[i],
+                linewidth=1.5,
+                label=f"Body {i + 1} (m={self.simulator.masses[i]:.3g} M☉)",
+                alpha=0.9,
+            )
+            self.traj_lines.append(line)
+            self.ax_3d.add_line(line)
+
+        self.body_markers = []
+        for i in range(self.simulator.n_bodies):
+            marker = Line3D(
+                [],
+                [],
+                [],
+                color=self.body_colors[i],
+                marker="o",
+                markersize=np.sqrt(self.body_sizes[i]) / 3,
+                linestyle="",
+                markeredgecolor="#ffffff",
+                markeredgewidth=0.5,
+            )
+            self.body_markers.append(marker)
+            self.ax_3d.add_line(marker)
+
+        self.ax_3d.legend(loc="upper left", fontsize=9, framealpha=0.9, fancybox=True)
+
+        self.ax_energy_dh = self.fig.add_subplot(self.gs[0, 1])
+        self.ax_energy_dh.set_title(
+            "ENERGY DEVIATION", fontsize=11, fontweight="bold", color="#00ff99"
+        )
+        (self.energy_dh_line,) = self.ax_energy_dh.plot(
+            [], [], color="#ff00ff", linewidth=2, label="ΔE"
+        )
+        self.ax_energy_dh.set_xlabel("Time (years)", fontsize=9)
+        self.ax_energy_dh.set_ylabel("ΔE (Energy units)", fontsize=9, color="#ff00ff")
+        self.ax_energy_dh.grid(True, alpha=0.15)
+        self.ax_energy_dh.tick_params(axis="y", labelcolor="#ff00ff")
+        self.ax_energy_dh.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+
+        self.ax_energy_combined = self.fig.add_subplot(self.gs[1, 1])
+        self.ax_energy_combined.set_title(
+            "KINETIC & POTENTIAL ENERGY",
+            fontsize=11,
+            fontweight="bold",
+            color="#00ff99",
+        )
+        (self.kinetic_line,) = self.ax_energy_combined.plot(
+            [], [], color="#00ccff", linewidth=2, label="Kinetic (T)"
+        )
+        (self.potential_line,) = self.ax_energy_combined.plot(
+            [], [], color="#ff6600", linewidth=2, label="Potential (U)"
+        )
+        (self.total_line,) = self.ax_energy_combined.plot(
+            [], [], color="#ff00ff", linewidth=2, label="Total (E)"
+        )
+        self.ax_energy_combined.set_xlabel("Time (years)", fontsize=9)
+        self.ax_energy_combined.set_ylabel("Energy (natural units)", fontsize=9)
+        self.ax_energy_combined.grid(True, alpha=0.15)
+        self.ax_energy_combined.legend(loc="best", fontsize=8)
+
+        self.info_text = self.fig.text(
+            0.5,
+            0.01,
+            "Initialising...",
+            ha="center",
+            fontsize=10,
+            family="monospace",
+            bbox={
+                "boxstyle": "round",
+                "facecolor": "#1a1a1a",
+                "edgecolor": "#00ff99",
+                "linewidth": 2,
+                "pad": 0.8,
+            },
+            color="#f0f0f0",
+        )
+
+    def compute_center_of_mass(self, positions: np.ndarray) -> np.ndarray:
+        """Compute center of mass position."""
+        total_mass = np.sum(self.simulator.masses)
+        return (
+            np.sum(positions * self.simulator.masses[:, np.newaxis], axis=0)
+            / total_mass
+        )
+
+    def run(self):
+        """Run the simulation with live visualization."""
+        wall_t0 = time.time()
+        self.H0 = None
+
+        sim_gen = self.simulator.simulate(
+            dt=self.config.dt,
+            a_tol=self.config.a_tol,
+            r_tol=self.config.r_tol,
+            dt_max=self.config.dt_max,
+        )
+
+        def update(frame: int):
+            """Update function for matplotlib animation."""
+            finished = False
+
+            for _ in range(self.config.steps_per_frame):
+                try:
+                    t, positions, velocities, (T, U) = next(sim_gen)
+                except StopIteration:
+                    finished = True
+                    break
+
+                com = self.compute_center_of_mass(positions)
+                positions_rel = positions - com
+
+                if self.H0 is None:
+                    self.H0 = T + U
+                    print(f"Initial total energy: {self.H0:.6e}")
+
+                if self.frame_count < HISTORY_CAPACITY:
+                    self.ts[self.frame_count] = t
+                    self.Hs[self.frame_count] = T + U - self.H0
+                    self.Ts[self.frame_count] = T
+                    self.Us[self.frame_count] = U
+                    self.positions_history[:, self.frame_count, :] = positions_rel
+                    self.frame_count += 1
+                else:
+                    finished = True
+                    break
+
+            if self.frame_count == 0 or finished:
+                if finished:
+                    self.info_text.set_text("SIMULATION COMPLETE")
+                return (
+                    self.traj_lines
+                    + self.body_markers
+                    + [
+                        self.energy_dh_line,
+                        self.kinetic_line,
+                        self.potential_line,
+                        self.total_line,
+                    ]
+                )
+
+            actual_frames = self.frame_count
+            ts_data = self.ts[:actual_frames]
+            positions_data = self.positions_history[:, :actual_frames, :]
+
+            for i in range(self.simulator.n_bodies):
+                self.traj_lines[i].set_data(
+                    positions_data[i, :, 0], positions_data[i, :, 1]
+                )
+                self.traj_lines[i].set_3d_properties(positions_data[i, :, 2])
+
+                last_idx = min(actual_frames - 1, positions_data.shape[1] - 1)
+                self.body_markers[i].set_data(
+                    [positions_data[i, last_idx, 0]], [positions_data[i, last_idx, 1]]
+                )
+                self.body_markers[i].set_3d_properties([positions_data[i, last_idx, 2]])
+
+            if actual_frames > 0:
+                visible_positions = positions_data[
+                    :, max(0, actual_frames - 500) : actual_frames, :
+                ]
+                all_coords = visible_positions.reshape(-1, 3)
+                if len(all_coords) > 0:
+                    center = np.mean(all_coords, axis=0)
+                    max_range = np.max(np.ptp(all_coords, axis=0)) / 2
+                    margin = max(max_range * 0.1, 0.1)
+
+                    self.ax_3d.set_xlim(
+                        center[0] - max_range - margin, center[0] + max_range + margin
+                    )
+                    self.ax_3d.set_ylim(
+                        center[1] - max_range - margin, center[1] + max_range + margin
+                    )
+                    self.ax_3d.set_zlim(
+                        center[2] - max_range - margin, center[2] + max_range + margin
+                    )
+
+            self.energy_dh_line.set_data(ts_data, self.Hs[:actual_frames])
+            self.kinetic_line.set_data(ts_data, self.Ts[:actual_frames])
+            self.potential_line.set_data(ts_data, self.Us[:actual_frames])
+            self.total_line.set_data(ts_data, self.Hs[:actual_frames])
+
+            for ax in [self.ax_energy_dh, self.ax_energy_combined]:
+                ax.relim()
+                ax.autoscale_view()
+
+            wall_elapsed = time.time() - wall_t0
+            status = "● COMPLETE" if finished else "● RUNNING"
+            speed_ratio = ts_data[-1] / wall_elapsed if wall_elapsed > 0 else 0
+            energy_error_pct = (
+                abs(self.Hs[actual_frames - 1])
+                / (abs(self.H0) if self.H0 != 0 else 1)
+                * 100
+            )
+
+            status_str = (
+                f"{status}  │  "
+                f"Time: {ts_data[-1]:.2f} yr  │  "
+                f"Real: {wall_elapsed:.1f} s  │  "
+                f"Speed: {speed_ratio:.1f}x  │  "
+                f"ΔE: {self.Hs[actual_frames - 1]:.2e} ({energy_error_pct:.6f}%)"
+            )
+            self.info_text.set_text(status_str)
+
+            return (
+                self.traj_lines
+                + self.body_markers
+                + [
+                    self.energy_dh_line,
+                    self.kinetic_line,
+                    self.potential_line,
+                    self.total_line,
+                ]
+            )
+
+        ani = animation.FuncAnimation(
+            self.fig,
+            update,
+            interval=self.config.interval_ms,
+            blit=False,
+            cache_frame_data=False,
+            save_count=0,
+        )
+
+        plt.show()
+
+
+def main():
+    bodies = show_body_setup_dialog()
+
+    if not bodies:
+        print("No bodies configured. Exiting.")
+        sys.exit(1)
+
+    print(f"Initializing simulation with {len(bodies)} bodies...")
+    total_mass = 0
+    for body in bodies:
+        total_mass += body.mass
+        print(
+            f"  Body {body.id}: m={body.mass:.3g} M☉, "
+            f"r=({body.position.x:.2f}, {body.position.y:.2f}, {body.position.z:.2f}) AU, "
+            f"v=({body.velocity.x:.2f}, {body.velocity.y:.2f}, {body.velocity.z:.2f}) AU/yr"
+        )
+    print(f"  Total system mass: {total_mass:.3g} M☉")
+
+    simulator = NBodySimulator(bodies, G=1.0, softening=0.001)
+
+    config = SimulationConfig(
+        t0=0.0,
+        dt=dt,
+        a_tol=1e-8,
+        r_tol=1e-3,
+        dt_max=0.1,
+        steps_per_frame=steps_per_frame,
+        interval_ms=30,
     )
-    info_text.set_text(status_str)
 
-    return (
-        traj_lines
-        + body_markers
-        + [energy_dh_line, kinetic_line, potential_line, total_line]
-    )
+    visualizer = SimulationVisualizer(simulator, config)
+
+    print("\nStarting simulation visualization...")
+    print("Controls:")
+    print("  - Mouse drag: Rotate view")
+    print("  - Mouse wheel: Zoom")
+    print("  - Close window to exit")
+    print("=" * 60)
+
+    visualizer.run()
 
 
-ani = animation.FuncAnimation(
-    fig,
-    update,
-    interval=cfg.interval_ms,
-    blit=False,
-    cache_frame_data=False,
-    save_count=0,
-)
-plt.show()
+if __name__ == "__main__":
+    main()
