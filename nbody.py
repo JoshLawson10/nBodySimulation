@@ -1,5 +1,6 @@
 import sys
 import time
+from collections import deque
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from tkinter import (
@@ -71,6 +72,7 @@ class BodySetupDialog:
         self.master = master
         self.result = None
         self.body_frames = []
+        self.selected_preset = None
 
         master.title("N-Body Simulation Setup")
         master.geometry("650x750")
@@ -138,6 +140,18 @@ class BodySetupDialog:
             pady=5,
         )
         random_btn.pack(side=LEFT, padx=5)
+
+        figure8_btn = Button(
+            button_frame,
+            text="FIGURE-8",
+            command=self.load_figure8,
+            bg="#4d0a4d",
+            fg="#ff00ff",
+            font=("monospace", 10, "bold"),
+            padx=10,
+            pady=5,
+        )
+        figure8_btn.pack(side=LEFT, padx=5)
 
         simulate_btn = Button(
             button_frame,
@@ -302,6 +316,46 @@ class BodySetupDialog:
                 num_label = bf["frame"].winfo_children()[0]
                 num_label.config(text=f"#{i + 1}")
 
+    def load_figure8(self):
+        print("Loading Figure-8 three-body solution...")
+        while len(self.body_frames) > 0:
+            self.remove_body_row()
+
+        print(
+            "Setting up three equal masses with specific initial conditions for the figure-8 solution..."
+        )
+
+        for _ in range(3):
+            self.add_body_row()
+
+        print("Assigning initial positions and velocities for the figure-8 solution...")
+
+        positions = [
+            (-0.970004536, 0.243087530, 0),
+            (0.0, 0.0, 0),
+            (0.970004536, -0.243087530, 0),
+        ]
+
+        velocities = [
+            (0.466203685, 0.432365730, 0),
+            (-0.932407370, -0.864731460, 0),
+            (0.466203685, 0.432365730, 0),
+        ]
+
+        scale = 5.0
+        velocity_scale = 1.0 / np.sqrt(scale)
+
+        for i in range(3):
+            self.body_frames[i]["mass_var"].set("1.0")
+            self.body_frames[i]["pos_x"].set(f"{positions[i][0] * scale:.6f}")
+            self.body_frames[i]["pos_y"].set(f"{positions[i][1] * scale:.6f}")
+            self.body_frames[i]["pos_z"].set(f"{positions[i][2] * scale:.6f}")
+            self.body_frames[i]["vel_x"].set(f"{velocities[i][0] * velocity_scale:.6f}")
+            self.body_frames[i]["vel_y"].set(f"{velocities[i][1] * velocity_scale:.6f}")
+            self.body_frames[i]["vel_z"].set(f"{velocities[i][2] * velocity_scale:.6f}")
+
+        self.selected_preset = "figure8"
+
     def randomize_bodies(self):
         rng = np.random.default_rng()
         for body_data in self.body_frames:
@@ -345,7 +399,7 @@ class BodySetupDialog:
                     )
                 )
 
-            self.result = bodies
+            self.result = (bodies, self.selected_preset)
             self.master.destroy()
         except ValueError as e:
             messagebox.showerror(
@@ -354,13 +408,13 @@ class BodySetupDialog:
             )
 
 
-def show_body_setup_dialog() -> list[Body]:
+def show_body_setup_dialog() -> tuple[list[Body], str | None]:
     root = Tk()
     dialog = BodySetupDialog(root)
     root.wait_window()
     if dialog.result:
         return dialog.result
-    return []
+    return [], None
 
 
 def nbody_dynamics(
@@ -772,11 +826,18 @@ class SimulationVisualizer:
 
 
 def main():
-    bodies = show_body_setup_dialog()
+    bodies, preset = show_body_setup_dialog()
 
     if not bodies:
         print("No bodies configured. Exiting.")
         sys.exit(1)
+
+    if preset == "figure8":
+        steps_per_frame = 5
+        dt = 0.005
+    else:
+        steps_per_frame = STEPS_PER_FRAME
+        dt = 0.01
 
     print(f"Initializing simulation with {len(bodies)} bodies...")
     total_mass = 0
@@ -792,13 +853,8 @@ def main():
     simulator = NBodySimulator(bodies, G=1.0, softening=0.001)
 
     config = SimulationConfig(
-        t0=0.0,
         dt=dt,
-        a_tol=1e-8,
-        r_tol=1e-3,
-        dt_max=0.1,
         steps_per_frame=steps_per_frame,
-        interval_ms=30,
     )
 
     visualizer = SimulationVisualizer(simulator, config)
