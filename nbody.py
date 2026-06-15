@@ -1,6 +1,5 @@
 import sys
 import time
-from collections import deque
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from tkinter import (
@@ -539,10 +538,6 @@ class SimulationVisualizer:
         self.simulator = simulator
         self.config = config
 
-        n_coords = simulator.n_bodies * 3
-        initial_state = simulator.initial_state
-        initial_positions = initial_state[:n_coords].reshape(simulator.n_bodies, 3)
-
         if body_colors is None:
             self.body_colors = [
                 get_body_color(i, simulator.n_bodies) for i in range(simulator.n_bodies)
@@ -702,7 +697,7 @@ class SimulationVisualizer:
 
             for _ in range(self.config.steps_per_frame):
                 try:
-                    t, positions, velocities, (T, U) = next(sim_gen)
+                    t, positions, _, (T, U) = next(sim_gen)
                 except StopIteration:
                     finished = True
                     break
@@ -787,6 +782,9 @@ class SimulationVisualizer:
             wall_elapsed = time.time() - wall_t0
             status = "● COMPLETE" if finished else "● RUNNING"
             speed_ratio = ts_data[-1] / wall_elapsed if wall_elapsed > 0 else 0
+
+            assert self.H0 is not None, "H0 should have been initialized"
+
             energy_error_pct = (
                 abs(self.Hs[actual_frames - 1])
                 / (abs(self.H0) if self.H0 != 0 else 1)
@@ -813,7 +811,7 @@ class SimulationVisualizer:
                 ]
             )
 
-        ani = animation.FuncAnimation(
+        animation.FuncAnimation(
             self.fig,
             update,
             interval=self.config.interval_ms,
