@@ -78,7 +78,7 @@ def solve_ivp(
             dt = min(dt, dt_max)
         else:
             scale = 0.9 * (tolerance / error_estimate) ** 0.2
-            dt *= np.clip(scale, 0.1, 2.0)
+            dt *= float(np.clip(scale, 0.1, 2.0))
             dt = min(dt, dt_max)
 
 
