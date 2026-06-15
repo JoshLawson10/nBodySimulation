@@ -811,7 +811,7 @@ class SimulationVisualizer:
                 ]
             )
 
-        animation.FuncAnimation(
+        _ = animation.FuncAnimation(
             self.fig,
             update,
             interval=self.config.interval_ms,
