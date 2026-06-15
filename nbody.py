@@ -61,7 +61,7 @@ class SimulationConfig:
 
 def get_body_color(index: int, total: int) -> str:
     cmap = plt.colormaps["hsv"]
-    hue = index / max(total - 1, 1)
+    hue = (index + 0.5) / max(total - 1, 1)
     rgb = cmap(hue)
     return f"#{int(rgb[0] * 255):02x}{int(rgb[1] * 255):02x}{int(rgb[2] * 255):02x}"
 
@@ -481,6 +481,12 @@ class NBodySimulator:
         self.G = G
         self.softening = softening
 
+        self.ts = np.zeros(HISTORY_CAPACITY)
+        self.Hs = np.zeros(HISTORY_CAPACITY)
+        self.Ts = np.zeros(HISTORY_CAPACITY)
+        self.Us = np.zeros(HISTORY_CAPACITY)
+        self.positions_history = np.zeros((self.n_bodies, HISTORY_CAPACITY, 3))
+
         initial_positions = np.array(
             [[b.position.x, b.position.y, b.position.z] for b in bodies]
         )
@@ -493,6 +499,40 @@ class NBodySimulator:
         )
 
         self.dynamics_func = nbody_dynamics(self.masses, self.softening, self.G)
+
+        for i in range(self.n_bodies):
+            self.bodies[i].color = get_body_color(i, self.n_bodies)
+
+            masses = self.masses
+            min_mass = masses.min()
+            max_mass = masses.max()
+            if max_mass > min_mass:
+                normalized_mass = (masses[i] - min_mass) / (max_mass - min_mass)
+                self.bodies[i].size = 50 + 450 * normalized_mass
+            else:
+                self.bodies[i].size = 250
+
+            self.bodies[i].size = float(self.bodies[i].size)
+
+    def compute_center_of_mass(self, positions: np.ndarray) -> np.ndarray:
+        """Compute center of mass position."""
+        total_mass = np.sum(self.masses)
+        return np.sum(positions * self.masses[:, np.newaxis], axis=0) / total_mass
+
+    def update_energies(
+        self,
+        frame_count: int,
+        ts: float,
+        Hs: float,
+        Ts: float,
+        Us: float,
+        positions_rel: np.ndarray,
+    ):
+        self.ts[frame_count] = ts
+        self.Hs[frame_count] = Hs
+        self.Ts[frame_count] = Ts
+        self.Us[frame_count] = Us
+        self.positions_history[:, frame_count, :] = positions_rel
 
     def simulate(
         self,
@@ -532,35 +572,9 @@ class SimulationVisualizer:
         self,
         simulator: NBodySimulator,
         config: SimulationConfig,
-        body_colors: list[str] | None = None,
-        body_sizes: list[float] | None = None,
     ):
         self.simulator = simulator
         self.config = config
-
-        if body_colors is None:
-            self.body_colors = [
-                get_body_color(i, simulator.n_bodies) for i in range(simulator.n_bodies)
-            ]
-        else:
-            self.body_colors = body_colors
-
-        if body_sizes is None:
-            masses = simulator.masses
-            min_mass = masses.min()
-            max_mass = masses.max()
-            if max_mass > min_mass:
-                self.body_sizes = 50 + 450 * (masses - min_mass) / (max_mass - min_mass)
-            else:
-                self.body_sizes = np.full(simulator.n_bodies, 100)
-        else:
-            self.body_sizes = body_sizes
-
-        self.ts = np.zeros(HISTORY_CAPACITY)
-        self.Hs = np.zeros(HISTORY_CAPACITY)
-        self.Ts = np.zeros(HISTORY_CAPACITY)
-        self.Us = np.zeros(HISTORY_CAPACITY)
-        self.positions_history = np.zeros((simulator.n_bodies, HISTORY_CAPACITY, 3))
         self.frame_count = 0
 
         self._setup_ui()
@@ -594,7 +608,7 @@ class SimulationVisualizer:
                 [],
                 [],
                 [],
-                color=self.body_colors[i],
+                color=self.simulator.bodies[i].color,
                 linewidth=1.5,
                 label=f"Body {i + 1} (m={self.simulator.masses[i]:.3g} M☉)",
                 alpha=0.9,
@@ -608,9 +622,9 @@ class SimulationVisualizer:
                 [],
                 [],
                 [],
-                color=self.body_colors[i],
+                color=self.simulator.bodies[i].color,
                 marker="o",
-                markersize=np.sqrt(self.body_sizes[i]) / 3,
+                markersize=np.sqrt(self.simulator.bodies[i].size) / 3,
                 linestyle="",
                 markeredgecolor="#ffffff",
                 markeredgewidth=0.5,
@@ -671,14 +685,6 @@ class SimulationVisualizer:
             color="#f0f0f0",
         )
 
-    def compute_center_of_mass(self, positions: np.ndarray) -> np.ndarray:
-        """Compute center of mass position."""
-        total_mass = np.sum(self.simulator.masses)
-        return (
-            np.sum(positions * self.simulator.masses[:, np.newaxis], axis=0)
-            / total_mass
-        )
-
     def run(self):
         """Run the simulation with live visualization."""
         wall_t0 = time.time()
@@ -702,7 +708,7 @@ class SimulationVisualizer:
                     finished = True
                     break
 
-                com = self.compute_center_of_mass(positions)
+                com = self.simulator.compute_center_of_mass(positions)
                 positions_rel = positions - com
 
                 if self.H0 is None:
@@ -710,11 +716,9 @@ class SimulationVisualizer:
                     print(f"Initial total energy: {self.H0:.6e}")
 
                 if self.frame_count < HISTORY_CAPACITY:
-                    self.ts[self.frame_count] = t
-                    self.Hs[self.frame_count] = T + U - self.H0
-                    self.Ts[self.frame_count] = T
-                    self.Us[self.frame_count] = U
-                    self.positions_history[:, self.frame_count, :] = positions_rel
+                    self.simulator.update_energies(
+                        self.frame_count, t, T + U - self.H0, T, U, positions_rel
+                    )
                     self.frame_count += 1
                 else:
                     finished = True
@@ -735,8 +739,8 @@ class SimulationVisualizer:
                 )
 
             actual_frames = self.frame_count
-            ts_data = self.ts[:actual_frames]
-            positions_data = self.positions_history[:, :actual_frames, :]
+            ts_data = self.simulator.ts[:actual_frames]
+            positions_data = self.simulator.positions_history[:, :actual_frames, :]
 
             for i in range(self.simulator.n_bodies):
                 self.traj_lines[i].set_data(
@@ -770,10 +774,10 @@ class SimulationVisualizer:
                         center[2] - max_range - margin, center[2] + max_range + margin
                     )
 
-            self.energy_dh_line.set_data(ts_data, self.Hs[:actual_frames])
-            self.kinetic_line.set_data(ts_data, self.Ts[:actual_frames])
-            self.potential_line.set_data(ts_data, self.Us[:actual_frames])
-            self.total_line.set_data(ts_data, self.Hs[:actual_frames])
+            self.energy_dh_line.set_data(ts_data, self.simulator.Hs[:actual_frames])
+            self.kinetic_line.set_data(ts_data, self.simulator.Ts[:actual_frames])
+            self.potential_line.set_data(ts_data, self.simulator.Us[:actual_frames])
+            self.total_line.set_data(ts_data, self.simulator.Hs[:actual_frames])
 
             for ax in [self.ax_energy_dh, self.ax_energy_combined]:
                 ax.relim()
@@ -786,7 +790,7 @@ class SimulationVisualizer:
             assert self.H0 is not None, "H0 should have been initialized"
 
             energy_error_pct = (
-                abs(self.Hs[actual_frames - 1])
+                abs(self.simulator.Hs[actual_frames - 1])
                 / (abs(self.H0) if self.H0 != 0 else 1)
                 * 100
             )
@@ -796,7 +800,7 @@ class SimulationVisualizer:
                 f"Time: {ts_data[-1]:.2f} yr  │  "
                 f"Real: {wall_elapsed:.1f} s  │  "
                 f"Speed: {speed_ratio:.1f}x  │  "
-                f"ΔE: {self.Hs[actual_frames - 1]:.2e} ({energy_error_pct:.6f}%)"
+                f"ΔE: {self.simulator.Hs[actual_frames - 1]:.2e} ({energy_error_pct:.6f}%)"
             )
             self.info_text.set_text(status_str)
 

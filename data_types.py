@@ -24,6 +24,7 @@ class Body:
     velocity: Vector3
     name: str = ""
     color: str = "red"
+    size: float = 100.0
 
     def __post_init__(self):
         if not self.name:
