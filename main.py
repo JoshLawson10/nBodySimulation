@@ -1,3 +1,4 @@
+import math
 import sys
 
 import numpy as np
@@ -8,7 +9,7 @@ from physics.dynamics import NBodyDynamics
 from physics.system import NBodySystem
 from simulation.runner import SimulationRunner
 from ui.body_setup_dialog import show_body_setup_dialog
-from visualisation.visualiser import SimulationVisualiser
+from visualisation.single_visualiser import SimulationVisualiser
 
 DEFAULT_DT = 0.01
 FIGURE8_DT = 0.005
@@ -77,8 +78,8 @@ def create_runner(
 ) -> SimulationRunner:
     system = build_system(bodies)
 
-    dynamics = NBodyDynamics(system=system, softening=1e-3)
-    integrator = AdaptiveRK45Integrator(a_tol=1e-8, r_tol=1e-3, dt_max=0.1)
+    dynamics = NBodyDynamics(system=system, softening=1e-3, G=4 * math.pi**2)
+    integrator = AdaptiveRK45Integrator(a_tol=1e-8, r_tol=1e-3, dt_max=0.001)
 
     initial_state = build_initial_state(bodies)
 

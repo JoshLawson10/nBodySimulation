@@ -1,3 +1,4 @@
+import math
 import random
 from tkinter import (
     BOTH,
@@ -103,6 +104,30 @@ class BodySetupDialog:
             pady=5,
         )
         figure8_btn.pack(side=LEFT, padx=5)
+
+        orrery_btn = Button(
+            button_frame,
+            text="ORRERY",
+            command=self.load_orrery,
+            bg="#0a2d4d",
+            fg="#00ccff",
+            font=("monospace", 10, "bold"),
+            padx=10,
+            pady=5,
+        )
+        orrery_btn.pack(side=LEFT, padx=5)
+
+        solar_btn = Button(
+            button_frame,
+            text="SOLAR SYSTEM",
+            command=self.load_solar_system,
+            bg="#1b3d0a",
+            fg="#99ff66",
+            font=("monospace", 10, "bold"),
+            padx=10,
+            pady=5,
+        )
+        solar_btn.pack(side=LEFT, padx=5)
 
         simulate_btn = Button(
             button_frame,
@@ -267,45 +292,109 @@ class BodySetupDialog:
                 num_label = bf["frame"].winfo_children()[0]
                 num_label.config(text=f"#{i + 1}")
 
-    def load_figure8(self):
-        print("Loading Figure-8 three-body solution...")
-        while len(self.body_frames) > 0:
+    def _clear_and_resize(self, n: int) -> None:
+        while self.body_frames:
             self.remove_body_row()
-
-        print(
-            "Setting up three equal masses with specific initial conditions for the figure-8 solution..."
-        )
-
-        for _ in range(3):
+        for _ in range(n):
             self.add_body_row()
 
-        print("Assigning initial positions and velocities for the figure-8 solution...")
+    def _set_body(
+        self,
+        idx: int,
+        mass: float,
+        px: float,
+        py: float,
+        pz: float,
+        vx: float,
+        vy: float,
+        vz: float,
+    ) -> None:
+        bf = self.body_frames[idx]
+        bf["mass_var"].set(str(mass))
+        bf["pos_x"].set(str(px))
+        bf["pos_y"].set(str(py))
+        bf["pos_z"].set(str(pz))
+        bf["vel_x"].set(str(vx))
+        bf["vel_y"].set(str(vy))
+        bf["vel_z"].set(str(vz))
+
+    def load_figure8(self):
+        self._clear_and_resize(3)
 
         positions = [
             (-0.970004536, 0.243087530, 0),
             (0.0, 0.0, 0),
             (0.970004536, -0.243087530, 0),
         ]
-
         velocities = [
-            (0.466203685, 0.432365730, 0),
-            (-0.932407370, -0.864731460, 0),
-            (0.466203685, 0.432365730, 0),
+            (0.466203685 * 2 * math.pi, 0.432365730 * 2 * math.pi, 0),
+            (-0.932407370 * 2 * math.pi, -0.864731460 * 2 * math.pi, 0),
+            (0.466203685 * 2 * math.pi, 0.432365730 * 2 * math.pi, 0),
         ]
 
         scale = 5.0
         velocity_scale = 1.0 / np.sqrt(scale)
 
         for i in range(3):
-            self.body_frames[i]["mass_var"].set("1.0")
-            self.body_frames[i]["pos_x"].set(f"{positions[i][0] * scale:.6f}")
-            self.body_frames[i]["pos_y"].set(f"{positions[i][1] * scale:.6f}")
-            self.body_frames[i]["pos_z"].set(f"{positions[i][2] * scale:.6f}")
-            self.body_frames[i]["vel_x"].set(f"{velocities[i][0] * velocity_scale:.6f}")
-            self.body_frames[i]["vel_y"].set(f"{velocities[i][1] * velocity_scale:.6f}")
-            self.body_frames[i]["vel_z"].set(f"{velocities[i][2] * velocity_scale:.6f}")
+            self._set_body(
+                i,
+                mass=1.0,
+                px=positions[i][0] * scale,
+                py=positions[i][1] * scale,
+                pz=positions[i][2] * scale,
+                vx=velocities[i][0] * velocity_scale,
+                vy=velocities[i][1] * velocity_scale,
+                vz=velocities[i][2] * velocity_scale,
+            )
 
         self.selected_preset = "figure8"
+
+    def load_orrery(self):
+        self._clear_and_resize(3)
+
+        self._set_body(0, mass=1.0, px=0.0, py=0.0, pz=0.0, vx=0.0, vy=0.0, vz=0.0)
+        self._set_body(
+            1,
+            mass=3.0034896149156e-6,
+            px=0.99996874,
+            py=0.0,
+            pz=0.0,
+            vx=0.0,
+            vy=6.280538,
+            vz=0.0,
+        )
+        self._set_body(
+            2,
+            mass=3.6943033497651e-8,
+            px=1.00253829,
+            py=0.0,
+            pz=0.0,
+            vx=0.0,
+            vy=6.495682,
+            vz=0.0,
+        )
+
+        self.selected_preset = "orrery"
+
+    def load_solar_system(self):
+        self._clear_and_resize(9)
+
+        planets = [
+            (1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),  # Sun
+            (1.66012e-7, 0.387098, 0.0, 0.0, 0.0, 10.084, 0.0),  # Mercury
+            (2.44784e-6, 0.723332, 0.0, 0.0, 0.0, 7.386, 0.0),  # Venus
+            (3.00349e-6, 1.000000, 0.0, 0.0, 0.0, 6.283185307, 0.0),  # Earth
+            (3.22715e-7, 1.523679, 0.0, 0.0, 0.0, 5.089, 0.0),  # Mars
+            (9.54792e-4, 5.2044, 0.0, 0.0, 0.0, 2.755, 0.0),  # Jupiter
+            (2.85886e-4, 9.5826, 0.0, 0.0, 0.0, 2.029, 0.0),  # Saturn
+            (4.36624e-5, 19.2184, 0.0, 0.0, 0.0, 1.433, 0.0),  # Uranus
+            (5.15139e-5, 30.1104, 0.0, 0.0, 0.0, 1.144, 0.0),  # Neptune
+        ]
+
+        for i, body in enumerate(planets):
+            self._set_body(i, *body)
+
+        self.selected_preset = "solar_system"
 
     def randomize_bodies(self):
         rng = np.random.default_rng()

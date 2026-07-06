@@ -6,9 +6,7 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3D
 
 from simulation.runner import SimulationRunner
-from visualisation.styles import (
-    BodyStyleFactory,
-)
+from visualisation.styles import BodyStyleFactory
 
 rcParams["figure.facecolor"] = "#0d0d0d"
 rcParams["axes.facecolor"] = "#1a1a1a"
@@ -29,19 +27,17 @@ class SimulationVisualiser:
         runner: SimulationRunner,
         *,
         dt: float,
-        steps_per_frame: int,
         interval_ms: int,
+        steps_per_frame: int = 1,
     ) -> None:
         self.runner = runner
-
         self.dt = dt
-        self.steps_per_frame = steps_per_frame
         self.interval_ms = interval_ms
 
         self.frame_generator = runner.frames(dt=dt)
-
         self.styles = BodyStyleFactory.create(runner.dynamics.system.masses)
 
+        self._pace_start = time.perf_counter()
         self.wall_start = time.time()
 
         self._setup_figure()
@@ -89,7 +85,6 @@ class SimulationVisualiser:
             fontweight="bold",
             color="#00ff99",
         )
-
         self.ax_energy_combined.set_xlabel("Time (years)", fontsize=9)
         self.ax_energy_combined.set_ylabel("Energy (natural units)", fontsize=9)
         self.ax_energy_combined.grid(True, alpha=0.15)
@@ -130,7 +125,6 @@ class SimulationVisualiser:
                 linewidth=1.5,
                 label=f"Body {index + 1} (m={self.runner.dynamics.system.masses[index]:.3g} M☉)",
             )
-
             marker = Line3D(
                 [],
                 [],
@@ -159,56 +153,51 @@ class SimulationVisualiser:
         self.ax_3d.legend(loc="upper left", fontsize=9, framealpha=0.9, fancybox=True)
         self.ax_energy_combined.legend(loc="best", fontsize=8)
 
-    def _advance_simulation(
-        self,
-    ) -> bool:
-        finished = False
+    def _advance_simulation(self) -> bool:
+        frame_budget_s = self.interval_ms / 1000.0
 
-        for _ in range(self.steps_per_frame):
+        wall_now = time.perf_counter()
+        target_sim_t = wall_now - self._pace_start
+
+        while True:
             try:
-                next(self.frame_generator)
-
+                frame = next(self.frame_generator)
             except StopIteration:
-                finished = True
+                return True
+
+            if frame.time >= target_sim_t:
                 break
 
-        return finished
+        elapsed_step = time.perf_counter() - wall_now
+        sleep_s = frame_budget_s - elapsed_step
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+        return False
 
     def _draw_trajectories(self) -> None:
         frames = self.runner.history.frames
-
         if not frames:
             return
 
         body_count = self.runner.dynamics.body_count
         latest = frames[-1]
-
         trajectories = np.stack(
             [frame.positions - frame.center_of_mass for frame in frames]
         )
 
         for body_index in range(body_count):
             coords = trajectories[:, body_index, :]
-
             self.traj_lines[body_index].set_data_3d(
-                coords[:, 0],
-                coords[:, 1],
-                coords[:, 2],
+                coords[:, 0], coords[:, 1], coords[:, 2]
             )
-
             current = latest.positions[body_index] - latest.center_of_mass
-
             self.body_markers[body_index].set_data_3d(
-                [current[0]],
-                [current[1]],
-                [current[2]],
+                [current[0]], [current[1]], [current[2]]
             )
 
-    def _draw_energy(
-        self,
-    ) -> None:
+    def _draw_energy(self) -> None:
         frames = self.runner.history.frames
-
         if not frames:
             return
 
@@ -218,27 +207,21 @@ class SimulationVisualiser:
         total = np.array([f.total_energy for f in frames])
 
         self.energy_dh_line.set_data(ts, total - total[0])
-
         self.kinetic_line.set_data(ts, kinetic)
         self.potential_line.set_data(ts, potential)
         self.total_line.set_data(ts, total)
 
         self.ax_energy_dh.relim()
         self.ax_energy_dh.autoscale_view()
-
         self.ax_energy_combined.relim()
         self.ax_energy_combined.autoscale_view()
 
-    def _update_bounds(
-        self,
-    ) -> None:
+    def _update_bounds(self) -> None:
         frames = self.runner.history.frames
-
         if not frames:
             return
 
         latest = frames[-1]
-
         positions = latest.positions - latest.center_of_mass
         center = np.mean(positions, axis=0)
         radius = max(np.max(np.ptp(positions, axis=0)) / 2, 0.1)
@@ -247,9 +230,7 @@ class SimulationVisualiser:
         self.ax_3d.set_ylim(center[1] - radius, center[1] + radius)
         self.ax_3d.set_zlim(center[2] - radius, center[2] + radius)
 
-    def _draw_status(
-        self,
-    ) -> None:
+    def _draw_status(self) -> None:
         if len(self.runner.history) == 0:
             return
 
@@ -260,18 +241,14 @@ class SimulationVisualiser:
 
         self.info_text.set_text(
             f"t={latest.time:.2f} yr | "
-            f"speed={speed:.1f}x | "
+            f"speed={speed:.2f}x | "
             f"ΔE={stats.energy_error:.2e} (relative: {stats.energy_error_percent:.6f}%)"
         )
 
-    def _update(
-        self,
-        frame_number: int,
-    ):
+    def _update(self, frame_number: int):
         del frame_number
 
         self._advance_simulation()
-
         self._draw_trajectories()
         self._draw_energy()
         self._update_bounds()
@@ -284,12 +261,11 @@ class SimulationVisualiser:
         )
 
     def run(self) -> None:
-        _ = animation.FuncAnimation(
+        self._anim = animation.FuncAnimation(
             self.fig,
             self._update,
             interval=self.interval_ms,
             cache_frame_data=False,
             blit=False,
         )
-
         plt.show()
