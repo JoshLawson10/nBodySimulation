@@ -27,7 +27,7 @@ class BodySetupDialog:
         self.selected_preset = None
 
         master.title("N-Body Simulation Setup")
-        master.geometry("650x750")
+        master.geometry("1000x750")
         master.configure(bg="#1a1a1a")
 
         title = Label(
